@@ -1,0 +1,32 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.pdb
+*.exe
+*.log
+publish/
+out/
+
+## IDE
+.vs/
+.vscode/
+*.swp
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+
+## AlphaApp data (runtime artifacts)
+data/
+snapshots/
+*.qcow2
+*.iso
+*.cph
+
+## Session
+.copilot/

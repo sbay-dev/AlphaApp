@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AlphaApp.Core/AlphaApp.Core.csproj" />
+  <Project Path="AlphaApp.Web/AlphaApp.Web.csproj" />
+</Solution>

@@ -1,0 +1,103 @@
+@model List<SnapshotInfo>
+@{
+    ViewData["Title"] = "التطبيقات";
+}
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <h1 style="color:var(--accent)">📱 التطبيقات واللقطات</h1>
+    <a href="/Apps/Create" class="btn btn-primary">➕ إنشاء AlphaApp جديد</a>
+</div>
+
+@if (!Model.Any())
+{
+    <div class="card" style="text-align:center;padding:48px">
+        <div style="font-size:3rem;margin-bottom:16px">📭</div>
+        <p style="color:var(--text-muted);margin-bottom:16px">لا توجد لقطات بعد</p>
+        <a href="/Apps/Create" class="btn btn-primary">ابدأ بإنشاء أول AlphaApp</a>
+    </div>
+}
+else
+{
+    <div class="card">
+        <table>
+            <thead>
+                <tr>
+                    <th>التطبيق</th>
+                    <th>المعمارية</th>
+                    <th>الذاكرة</th>
+                    <th>الحجم</th>
+                    <th>المسارات</th>
+                    <th>الحالة</th>
+                    <th>الإنشاء</th>
+                    <th>إجراءات</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var snapshot in Model)
+                {
+                    <tr>
+                        <td style="font-weight:bold">@snapshot.AppName</td>
+                        <td><code>@snapshot.Architecture</code></td>
+                        <td>@snapshot.MemoryMB MB</td>
+                        <td>@((snapshot.TotalSizeBytes / 1048576.0).ToString("F1")) MB</td>
+                        <td style="font-size:0.75rem;max-width:260px">
+                            <div title="@snapshot.DiskImagePath" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#8b949e">
+                                💿 @System.IO.Path.GetFileName(snapshot.DiskImagePath)
+                            </div>
+                            @{
+                                var wasmDir = System.IO.Path.Combine(
+                                    System.IO.Path.GetDirectoryName(snapshot.DiskImagePath) ?? "",
+                                    "..", "..", "snapshots", "wasm", snapshot.Id);
+                                var configPath = System.IO.Path.Combine(wasmDir, "config.json");
+                            }
+                            @if (System.IO.File.Exists(configPath))
+                            {
+                                <div title="@System.IO.Path.GetFullPath(wasmDir)" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#2ecc71">
+                                    🌐 wasm/@snapshot.Id/
+                                </div>
+                            }
+                            @{
+                                var cphFiles = System.IO.Directory.Exists(wasmDir)
+                                    ? System.IO.Directory.GetFiles(wasmDir, "*.cph")
+                                    : Array.Empty<string>();
+                            }
+                            @if (cphFiles.Length > 0)
+                            {
+                                var cphSize = new System.IO.FileInfo(cphFiles[0]).Length;
+                                <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e67e22">
+                                    📦 @System.IO.Path.GetFileName(cphFiles[0]) <span style="color:#8b949e">(@((cphSize / 1048576.0).ToString("F1")) MB)</span>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @switch (snapshot.Status)
+                            {
+                                case SnapshotStatus.WasmConverted:
+                                    <span class="badge badge-success">جاهز للمتصفح</span>
+                                    break;
+                                case SnapshotStatus.Ready:
+                                    <span class="badge badge-info">جاهز</span>
+                                    break;
+                                default:
+                                    <span class="badge badge-warning">@snapshot.Status</span>
+                                    break;
+                            }
+                        </td>
+                        <td style="color:var(--text-muted);font-size:0.85rem">@snapshot.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td style="white-space:nowrap">
+                            <a href="/Player?id=@snapshot.Id" class="btn btn-primary" style="font-size:0.8rem;padding:4px 12px">▶️ تشغيل</a>
+                            @if (cphFiles.Length > 0)
+                            {
+                                <a href="/api/apps/@snapshot.Id/download-cph" class="btn" style="font-size:0.8rem;padding:4px 12px;background:#e67e22;color:#fff;border:none;border-radius:6px">📦 .cph</a>
+                            }
+                            <form method="post" asp-action="Delete" asp-route-id="@snapshot.Id" style="display:inline"
+                                  onsubmit="return confirm('هل أنت متأكد؟')">
+                                <button type="submit" class="btn btn-danger" style="font-size:0.8rem;padding:4px 12px">🗑️</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

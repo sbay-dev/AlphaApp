@@ -1,0 +1,75 @@
+@model DashboardViewModel
+@{
+    ViewData["Title"] = "الرئيسية";
+}
+
+<div style="margin-bottom:32px">
+    <h1 style="color:var(--accent);margin-bottom:8px">⚡ AlphaApp Platform</h1>
+    <p style="color:var(--text-muted)">
+        حوّل أي تطبيق لينكس إلى تطبيق يعمل فورياً في المتصفح — عبر تجميد VM + qemu-wasm
+    </p>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:32px">
+    <div class="card" style="text-align:center">
+        <div style="font-size:2.5rem;color:var(--accent)">@Model.TotalSnapshots</div>
+        <div style="color:var(--text-muted)">لقطات محفوظة</div>
+    </div>
+    <div class="card" style="text-align:center">
+        <div style="font-size:2.5rem;color:var(--success)">@Model.ReadySnapshots</div>
+        <div style="color:var(--text-muted)">جاهزة للمتصفح</div>
+    </div>
+    <div class="card" style="text-align:center">
+        <a href="/Apps/Create" class="btn btn-primary" style="font-size:1.2rem;padding:16px 32px">
+            ➕ إنشاء AlphaApp
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <h2 style="margin-bottom:16px;color:var(--accent)">🔬 كيف يعمل؟</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center">
+        <div style="padding:16px">
+            <div style="font-size:2rem">📦</div>
+            <div style="font-weight:bold;margin:8px 0">1. تحزيم</div>
+            <div style="font-size:0.85rem;color:var(--text-muted)">تطبيق MCPServerMvc + Alpine Linux</div>
+        </div>
+        <div style="padding:16px">
+            <div style="font-size:2rem">🚀</div>
+            <div style="font-weight:bold;margin:8px 0">2. إقلاع + تجميد</div>
+            <div style="font-size:0.85rem;color:var(--text-muted)">QEMU boot → انتظار الجاهزية → savevm</div>
+        </div>
+        <div style="padding:16px">
+            <div style="font-size:2rem">🧊</div>
+            <div style="font-weight:bold;margin:8px 0">3. لقطة مجمّدة</div>
+            <div style="font-size:0.85rem;color:var(--text-muted)">حالة كاملة: ذاكرة + CPU + أجهزة</div>
+        </div>
+        <div style="padding:16px">
+            <div style="font-size:2rem">🌐</div>
+            <div style="font-weight:bold;margin:8px 0">4. متصفح</div>
+            <div style="font-size:0.85rem;color:var(--text-muted)">qemu-wasm + loadvm → إقلاع فوري!</div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+    <h2 style="margin-bottom:16px;color:var(--accent)">🎯 التطبيق المستهدف: MCPServerMvc</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:0.9rem">
+        <div>
+            <div style="color:var(--text-muted);margin-bottom:4px">النوع</div>
+            <div>ASP.NET Core 10 MVC — منصة ذكاء اصطناعي</div>
+        </div>
+        <div>
+            <div style="color:var(--text-muted);margin-bottom:4px">المكونات</div>
+            <div>16 Controller • 30+ Service • 6 SignalR Hubs</div>
+        </div>
+        <div>
+            <div style="color:var(--text-muted);margin-bottom:4px">القدرات</div>
+            <div>RAG • Ollama • EF Core/SQLite • Code Execution</div>
+        </div>
+        <div>
+            <div style="color:var(--text-muted);margin-bottom:4px">الهدف</div>
+            <div>تشغيله في المتصفح عبر AlphaApp 🚀</div>
+        </div>
+    </div>
+</div>

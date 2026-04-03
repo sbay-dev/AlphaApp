@@ -1,0 +1,563 @@
+@model CreateAppViewModel
+@{
+    ViewData["Title"] = "إنشاء AlphaApp";
+}
+
+<h1 style="color:var(--accent);margin-bottom:24px">➕ إنشاء AlphaApp جديد</h1>
+
+<div class="card" style="max-width:800px">
+    <form method="post" asp-action="Create" id="create-form">
+        @Html.AntiForgeryToken()
+
+        <div class="form-group">
+            <label>اسم التطبيق</label>
+            <input asp-for="Name" class="form-control" placeholder="مثال: MCPServerMvc" required />
+        </div>
+
+        <div class="form-group">
+            <label>الوصف</label>
+            <input asp-for="Description" class="form-control" placeholder="وصف مختصر للتطبيق" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="form-group">
+                <label>التوزيعة الأساسية</label>
+                <select asp-for="BaseDistro" class="form-control">
+                    <option value="alpine">Alpine Linux (~5MB)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>المعمارية</label>
+                <select asp-for="Architecture" class="form-control">
+                    <option value="x86_64">x86_64</option>
+                    <option value="aarch64">aarch64 (ARM)</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- المسار الذكي -->
+        <div class="form-group" style="position:relative">
+            <label>📂 مسار مجلد المشروع</label>
+            <div style="display:flex;gap:8px">
+                <input asp-for="ProjectSourcePath" class="form-control" id="project-path"
+                       placeholder="/path/to/MCPServerMvc" style="flex:1" />
+                <button type="button" class="btn" onclick="openBrowser()" id="btn-browse"
+                        style="white-space:nowrap;background:var(--bg-secondary);border:1px solid var(--border)">
+                    📁 استعراض
+                </button>
+                <button type="button" class="btn btn-primary" onclick="analyzeProject()" id="btn-analyze">
+                    🔍 تحليل
+                </button>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+                استعرض المجلدات واختر مجلد المشروع — سيتم تحليله ونشره تلقائياً
+            </div>
+        </div>
+
+        <!-- نتائج التحليل -->
+        <div id="analysis-result" style="display:none;background:var(--bg-secondary);margin:16px 0;border-radius:8px">
+        </div>
+
+        <!-- حالة النشر -->
+        <div id="publish-status" style="display:none;margin:12px 0">
+        </div>
+
+        <!-- أمر التشغيل (يُملأ تلقائياً) -->
+        <div class="form-group">
+            <label>🎯 أمر التشغيل <span style="font-size:0.75rem;color:var(--success)" id="cmd-auto">(يُكتشف تلقائياً)</span></label>
+            <input asp-for="EntryCommand" class="form-control" id="entry-command"
+                   placeholder="سيتم اكتشافه تلقائياً..." />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="form-group">
+                <label>🔌 منفذ التطبيق <span style="font-size:0.75rem;color:var(--text-muted)" id="port-source"></span></label>
+                <input asp-for="GuestPort" type="number" class="form-control" id="guest-port" />
+            </div>
+            <div class="form-group">
+                <label>💾 الذاكرة (MB)</label>
+                <input asp-for="MemoryMB" type="number" class="form-control" />
+            </div>
+        </div>
+
+        <!-- الحزم المقترحة -->
+        <div class="form-group">
+            <label>📦 حزم Alpine المطلوبة</label>
+            <div id="packages-suggestion" style="margin-bottom:8px"></div>
+            <input asp-for="Packages" class="form-control" id="packages-input"
+                   placeholder="سيتم اقتراحها تلقائياً بعد التحليل..." />
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">
+                يمكنك تعديل القائمة يدوياً — الحزم مفصولة بفاصلة
+            </div>
+        </div>
+
+        <input type="hidden" asp-for="PublishedAppPath" id="published-path" />
+
+        <div asp-validation-summary="All" class="alert alert-danger"
+             style="display:@(ViewData.ModelState.ErrorCount > 0 ? "block" : "none")"></div>
+
+        <div style="display:flex;gap:12px;margin-top:24px">
+            <button type="button" class="btn btn-primary" id="btn-submit" onclick="startBuild()">🚀 إنشاء وبناء AlphaApp</button>
+            <a href="/Apps" class="btn">إلغاء</a>
+        </div>
+    </form>
+</div>
+
+<!-- مؤشر التقدّم الحي -->
+<div id="progress-overlay" style="
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;
+    justify-content:center;align-items:center;backdrop-filter:blur(6px)">
+    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:16px;
+        width:92%;max-width:600px;padding:32px;box-shadow:0 24px 80px rgba(0,0,0,0.6)">
+
+        <div style="text-align:center;margin-bottom:24px">
+            <div id="progress-icon" style="font-size:3rem;margin-bottom:8px">🔨</div>
+            <h2 style="color:var(--accent);margin:0;font-size:1.3rem" id="progress-title">جاري بناء AlphaApp...</h2>
+            <div style="color:var(--text-muted);font-size:0.85rem;margin-top:4px" id="progress-phase">التهيئة</div>
+        </div>
+
+        <!-- شريط التقدّم الكلي -->
+        <div style="background:var(--bg-secondary);border-radius:10px;height:24px;overflow:hidden;margin-bottom:20px;border:1px solid var(--border)">
+            <div id="progress-bar" style="height:100%;background:linear-gradient(90deg,var(--accent),#818cf8);
+                border-radius:10px;transition:width 0.5s ease;width:0%;display:flex;align-items:center;justify-content:center">
+                <span id="progress-percent" style="font-size:0.75rem;font-weight:bold;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.5)">0%</span>
+            </div>
+        </div>
+
+        <!-- خطوات البناء -->
+        <div id="progress-steps" style="max-height:320px;overflow-y:auto;padding:4px 0">
+        </div>
+
+        <!-- النتيجة النهائية -->
+        <div id="progress-result" style="display:none;text-align:center;margin-top:20px">
+        </div>
+    </div>
+</div>
+
+<!-- مستكشف الملفات -->
+<div id="file-browser-overlay" onclick="closeBrowser(event)" style="
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;
+    justify-content:center;align-items:center;backdrop-filter:blur(4px)">
+    <div id="file-browser-modal" style="
+        background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;
+        width:90%;max-width:650px;max-height:80vh;display:flex;flex-direction:column;
+        box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden" onclick="event.stopPropagation()">
+
+        <!-- العنوان -->
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <h3 style="margin:0;color:var(--accent);font-size:1.1rem">📁 مستكشف الملفات</h3>
+            <button onclick="closeBrowser()" style="background:none;border:none;color:var(--text-muted);font-size:1.3rem;cursor:pointer">✕</button>
+        </div>
+
+        <!-- شريط المسار -->
+        <div style="padding:10px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+            <button onclick="navigateUp()" id="btn-up" class="fb-btn" title="المجلد الأعلى">⬆️</button>
+            <button onclick="navigateHome()" class="fb-btn" title="المجلد الرئيسي">🏠</button>
+            <input id="browser-path-input" class="form-control" style="flex:1;font-size:0.85rem;direction:ltr;text-align:left"
+                   placeholder="/" onkeydown="if(event.key==='Enter'){navigateTo(this.value)}"/>
+            <button onclick="navigateTo(document.getElementById('browser-path-input').value)" class="fb-btn">↩️</button>
+        </div>
+
+        <!-- قائمة الملفات -->
+        <div id="browser-entries" style="flex:1;overflow-y:auto;padding:8px 12px;min-height:300px">
+            <div style="text-align:center;padding:40px;color:var(--text-muted)">جاري التحميل...</div>
+        </div>
+
+        <!-- شريط الأسفل -->
+        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <div id="browser-status" style="font-size:0.82rem;color:var(--text-muted)"></div>
+            <div style="display:flex;gap:8px">
+                <button onclick="closeBrowser()" class="btn" style="font-size:0.85rem">إلغاء</button>
+                <button onclick="selectCurrentFolder()" id="btn-select" class="btn btn-primary" style="font-size:0.85rem">
+                    ✅ اختيار هذا المجلد
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .fb-btn {
+        background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px;
+        color: var(--text); cursor: pointer; padding: 4px 10px; font-size: 1rem;
+        transition: background 0.15s;
+    }
+    .fb-btn:hover { background: var(--border); }
+    .fb-entry {
+        display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
+        cursor: pointer; transition: background 0.12s; border: 1px solid transparent;
+    }
+    .fb-entry:hover { background: var(--bg-secondary); }
+    .fb-entry.has-csproj { border-color: var(--accent); background: rgba(99,102,241,0.08); }
+    .fb-entry .fb-icon { font-size: 1.2rem; width: 28px; text-align: center; flex-shrink: 0; }
+    .fb-entry .fb-name { flex: 1; font-size: 0.9rem; direction: ltr; text-align: left; }
+    .fb-entry .fb-badge {
+        font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+        background: var(--accent); color: white;
+    }
+
+    /* مؤشر التقدّم */
+    .step-item {
+        display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+        border-radius: 8px; margin-bottom: 4px; transition: all 0.3s ease;
+        border-right: 3px solid transparent;
+    }
+    .step-item.running {
+        background: rgba(99,102,241,0.1); border-right-color: var(--accent);
+        animation: stepPulse 1.5s ease infinite;
+    }
+    .step-item.done { background: rgba(34,197,94,0.08); border-right-color: var(--success); }
+    .step-item.error { background: rgba(239,68,68,0.1); border-right-color: var(--danger); }
+    .step-item.pending { opacity: 0.4; }
+    .step-icon { font-size: 1.2rem; width: 28px; text-align: center; flex-shrink: 0; }
+    .step-name { flex: 1; font-size: 0.88rem; }
+    .step-duration { font-size: 0.75rem; color: var(--text-muted); direction: ltr; }
+    .step-msg { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+    @@keyframes stepPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+</style>
+
+<script>
+// ═══════════════ بث التقدّم الحي عبر SSE (بدون SignalR) ═══════════════
+
+const STEPS_DEFINITION = [
+    { id: 0, name: 'نشر المشروع (dotnet publish)', icon: '📦', phase: 'publish' },
+    { id: 1, name: 'بناء صورة القرص', icon: '💿', phase: 'snapshot' },
+    { id: 2, name: 'تحميل صورة التوزيعة', icon: '⬇️', phase: 'snapshot' },
+    { id: 3, name: 'إقلاع الضيف', icon: '🖥️', phase: 'snapshot' },
+    { id: 4, name: 'انتظار جاهزية التطبيق', icon: '⏳', phase: 'snapshot' },
+    { id: 5, name: 'تجميد الضيف', icon: '🧊', phase: 'snapshot' },
+    { id: 6, name: 'حفظ حالة VM (savevm)', icon: '💾', phase: 'snapshot' },
+    { id: 7, name: 'إنشاء بيانات اللقطة', icon: '📋', phase: 'snapshot' },
+    { id: 8, name: 'تجهيز حزمة qemu-wasm', icon: '🌐', phase: 'wasm' },
+    { id: 9, name: 'اكتمل البناء', icon: '🎉', phase: 'complete' },
+];
+
+function renderStepsList(skipPublish) {
+    const container = document.getElementById('progress-steps');
+    const steps = skipPublish ? STEPS_DEFINITION.filter(s => s.id !== 0) : STEPS_DEFINITION;
+    container.innerHTML = steps.map(s => `
+        <div class="step-item pending" id="step-${s.id}">
+            <span class="step-icon">${s.icon}</span>
+            <span class="step-name">${s.name}</span>
+            <span class="step-duration" id="step-dur-${s.id}"></span>
+        </div>
+    `).join('');
+}
+
+function updateProgressUI(evt) {
+    const bar = document.getElementById('progress-bar');
+    const pct = document.getElementById('progress-percent');
+    const title = document.getElementById('progress-title');
+    const phase = document.getElementById('progress-phase');
+    const icon = document.getElementById('progress-icon');
+
+    const percent = Math.round(evt.overallPercent);
+    bar.style.width = percent + '%';
+    pct.textContent = percent + '%';
+
+    const phaseNames = { publish: 'النشر', snapshot: 'إنشاء اللقطة', wasm: 'تحويل WASM', complete: 'مكتمل' };
+    phase.textContent = phaseNames[evt.phase] || evt.phase;
+
+    if (evt.status === 'running') {
+        title.textContent = evt.stepName + '...';
+        icon.textContent = '⚙️';
+    }
+
+    const stepEl = document.getElementById('step-' + evt.stepNumber);
+    if (stepEl) {
+        stepEl.className = 'step-item ' + evt.status;
+        const durEl = document.getElementById('step-dur-' + evt.stepNumber);
+        if (durEl && evt.durationSeconds > 0) {
+            durEl.textContent = evt.durationSeconds.toFixed(1) + 's';
+        }
+        if (evt.status === 'running') {
+            stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    if (evt.status === 'error') {
+        icon.textContent = '❌';
+        title.textContent = 'فشل: ' + evt.stepName;
+        const resultDiv = document.getElementById('progress-result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div style="color:var(--danger);margin-bottom:12px">❌ ${evt.message || 'حدث خطأ'}</div>
+            <button class="btn" onclick="closeProgress()">إغلاق</button>
+        `;
+    }
+
+    if (evt.phase === 'complete' && evt.status === 'done') {
+        icon.textContent = '🎉';
+        title.textContent = 'اكتمل البناء بنجاح!';
+        bar.style.width = '100%';
+        pct.textContent = '100%';
+        bar.style.background = 'linear-gradient(90deg, var(--success), #4ade80)';
+        const resultDiv = document.getElementById('progress-result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div style="color:var(--success);font-size:1.1rem;margin-bottom:12px">${evt.message || '✅ تم بنجاح!'}</div>
+            <div style="display:flex;gap:8px;justify-content:center">
+                <a href="/Apps" class="btn btn-primary">📋 عرض التطبيقات</a>
+                <button class="btn" onclick="closeProgress()">إغلاق</button>
+            </div>
+        `;
+    }
+}
+
+function closeProgress() {
+    document.getElementById('progress-overlay').style.display = 'none';
+}
+
+async function startBuild() {
+    const name = document.querySelector('[name="Name"]').value.trim();
+    if (!name) { alert('أدخل اسم التطبيق'); return; }
+
+    const hasProject = document.getElementById('project-path').value.trim();
+
+    // إظهار واجهة التقدّم
+    document.getElementById('progress-overlay').style.display = 'flex';
+    document.getElementById('progress-result').style.display = 'none';
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-bar').style.background = 'linear-gradient(90deg,var(--accent),#818cf8)';
+    document.getElementById('progress-percent').textContent = '0%';
+    document.getElementById('progress-title').textContent = 'جاري بناء AlphaApp...';
+    document.getElementById('progress-icon').textContent = '🔨';
+    renderStepsList(!hasProject);
+
+    const payload = {
+        name: name,
+        description: document.querySelector('[name="Description"]').value,
+        baseDistro: document.querySelector('[name="BaseDistro"]').value,
+        architecture: document.querySelector('[name="Architecture"]').value,
+        projectSourcePath: document.getElementById('project-path').value,
+        publishedAppPath: document.getElementById('published-path').value,
+        entryCommand: document.getElementById('entry-command').value,
+        guestPort: parseInt(document.getElementById('guest-port').value) || 5000,
+        memoryMB: parseInt(document.querySelector('[name="MemoryMB"]').value) || 256,
+        packages: document.getElementById('packages-input').value
+    };
+
+    try {
+        const resp = await fetch('/api/apps/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        // قراءة SSE stream من الاستجابة مباشرة
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const evt = JSON.parse(line.substring(6));
+                        updateProgressUI(evt);
+                    } catch {}
+                }
+            }
+        }
+    } catch (e) {
+        updateProgressUI({
+            stepNumber: 0, totalSteps: 9, stepName: 'خطأ في الاتصال',
+            status: 'error', overallPercent: 0, phase: 'error',
+            message: e.message
+        });
+    }
+}
+
+// ═══════════════ مستكشف الملفات ═══════════════
+let browserCurrentPath = '';
+let browserParentPath = '';
+
+function openBrowser() {
+    const overlay = document.getElementById('file-browser-overlay');
+    overlay.style.display = 'flex';
+    const currentVal = document.getElementById('project-path').value.trim();
+    navigateTo(currentVal || '');
+}
+
+function closeBrowser(e) {
+    if (e && e.target !== document.getElementById('file-browser-overlay')) return;
+    document.getElementById('file-browser-overlay').style.display = 'none';
+}
+
+async function navigateTo(path) {
+    const entriesDiv = document.getElementById('browser-entries');
+    entriesDiv.innerHTML = '<div style="text-align:center;padding:40px;color:var(--accent)">⏳ جاري التحميل...</div>';
+
+    try {
+        const resp = await fetch('/api/apps/browse?path=' + encodeURIComponent(path));
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || 'خطأ في التحميل');
+        }
+        const data = await resp.json();
+        browserCurrentPath = data.currentPath;
+        browserParentPath = data.parent || '';
+
+        document.getElementById('browser-path-input').value = data.currentPath;
+        document.getElementById('btn-up').disabled = !data.parent;
+
+        const status = document.getElementById('browser-status');
+        if (data.currentHasCsproj) {
+            status.innerHTML = '<span style="color:var(--accent)">✨ يحتوي على مشروع .NET</span>';
+            document.getElementById('btn-select').style.background = 'var(--accent)';
+        } else {
+            status.textContent = `${data.entries.length} عنصر`;
+            document.getElementById('btn-select').style.background = '';
+        }
+
+        if (data.entries.length === 0) {
+            entriesDiv.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">📭 المجلد فارغ</div>';
+            return;
+        }
+
+        entriesDiv.innerHTML = data.entries.map(e => {
+            const icon = e.type === 'csproj' ? '📋' : (e.hasCsproj ? '📂' : '📁');
+            const cls = e.hasCsproj ? 'fb-entry has-csproj' : 'fb-entry';
+            const badge = e.hasCsproj ? '<span class="fb-badge">.NET</span>' : '';
+            const csprojBadge = e.type === 'csproj' ? '<span class="fb-badge" style="background:var(--success)">csproj</span>' : '';
+            const onclick = e.type === 'dir'
+                ? `navigateTo('${escJs(e.fullPath)}')`
+                : `selectPath('${escJs(e.fullPath)}')`;
+            return `<div class="${cls}" onclick="${onclick}">
+                <span class="fb-icon">${icon}</span>
+                <span class="fb-name">${e.name}</span>
+                ${badge}${csprojBadge}
+            </div>`;
+        }).join('');
+
+    } catch (e) {
+        entriesDiv.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger)">❌ ${e.message}</div>`;
+    }
+}
+
+function navigateUp() { if (browserParentPath) navigateTo(browserParentPath); }
+function navigateHome() { navigateTo(''); }
+
+function selectCurrentFolder() {
+    document.getElementById('project-path').value = browserCurrentPath;
+    document.getElementById('file-browser-overlay').style.display = 'none';
+    analyzeProject();
+}
+
+function selectPath(path) {
+    document.getElementById('project-path').value = path;
+    document.getElementById('file-browser-overlay').style.display = 'none';
+    analyzeProject();
+}
+
+function escJs(s) {
+    return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// ═══════════════ التحليل ═══════════════
+async function analyzeProject() {
+    const path = document.getElementById('project-path').value.trim();
+    if (!path) { alert('أدخل مسار المشروع أولاً'); return; }
+
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري التحليل...';
+
+    const resultDiv = document.getElementById('analysis-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="padding:16px;color:var(--accent)">🔍 جاري تحليل المشروع...</div>';
+
+    try {
+        const resp = await fetch('/api/apps/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectPath: path })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || `HTTP ${resp.status}`);
+        }
+
+        const analysis = await resp.json();
+        displayAnalysis(analysis);
+
+        if (analysis.entryCommand)
+            document.getElementById('entry-command').value = analysis.entryCommand;
+        if (analysis.detectedPort)
+            document.getElementById('guest-port').value = analysis.detectedPort;
+        if (analysis.portSource)
+            document.getElementById('port-source').textContent = `(من ${analysis.portSource})`;
+        if (!document.querySelector('[name="Name"]').value && analysis.projectName)
+            document.querySelector('[name="Name"]').value = analysis.projectName;
+
+        if (analysis.suggestedPackages?.length > 0) {
+            displayPackageSuggestions(analysis.suggestedPackages);
+        }
+
+    } catch (e) {
+        resultDiv.innerHTML = `<div style="padding:16px;color:var(--danger)">❌ ${e.message}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = '🔍 تحليل';
+}
+
+function displayAnalysis(a) {
+    const div = document.getElementById('analysis-result');
+    const typeEmoji = { Web: '🌐', Worker: '⚙️', Console: '💻', Blazor: '🔥', Library: '📚' };
+    const emoji = typeEmoji[a.projectType] || '📄';
+
+    div.innerHTML = `
+        <div style="padding:16px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:1.5rem">${emoji}</span>
+                <span style="font-size:1.1rem;font-weight:bold;color:var(--accent)">${a.projectName}</span>
+                <span class="badge badge-info">${a.projectType}</span>
+                <span class="badge badge-success">${a.targetFramework}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem">
+                <div><span style="color:var(--text-muted)">DLL:</span> ${a.assemblyName}.dll</div>
+                <div><span style="color:var(--text-muted)">المنفذ:</span> ${a.detectedPort} <span style="font-size:0.75rem;color:var(--text-muted)">(${a.portSource})</span></div>
+                <div><span style="color:var(--text-muted)">أمر التشغيل:</span> <code>${a.entryCommand}</code></div>
+                <div><span style="color:var(--text-muted)">حزم NuGet:</span> ${a.nuGetPackages?.length || 0}</div>
+            </div>
+            ${a.entryCommandExplanation ? `<div style="margin-top:8px;font-size:0.82rem;color:var(--success)">💡 ${a.entryCommandExplanation}</div>` : ''}
+            ${!a.isValid ? `<div style="margin-top:8px;color:var(--danger)">⚠️ ${a.errors?.join(', ')}</div>` : ''}
+        </div>
+    `;
+}
+
+function displayPackageSuggestions(packages) {
+    const container = document.getElementById('packages-suggestion');
+    container.innerHTML = packages.map(p => `
+        <label style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:3px;
+               background:var(--bg-secondary);border:1px solid ${p.isRequired ? 'var(--accent)' : 'var(--border)'};
+               border-radius:6px;font-size:0.82rem;cursor:pointer">
+            <input type="checkbox" class="pkg-check" value="${p.name}"
+                   ${p.selected ? 'checked' : ''} onchange="updatePackages()">
+            <span style="color:${p.isRequired ? 'var(--accent)' : 'var(--text)'}">
+                ${p.name}${p.isRequired ? ' ⭐' : ''}
+            </span>
+            <span style="font-size:0.72rem;color:var(--text-muted)">${p.reason}</span>
+        </label>
+    `).join('');
+    updatePackages();
+}
+
+function updatePackages() {
+    const checked = [...document.querySelectorAll('.pkg-check:checked')].map(c => c.value);
+    document.getElementById('packages-input').value = checked.join(', ');
+}
+</script>

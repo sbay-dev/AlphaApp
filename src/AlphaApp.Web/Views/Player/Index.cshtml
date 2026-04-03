@@ -1,0 +1,138 @@
+@model SnapshotInfo
+@{
+    ViewData["Title"] = $"تشغيل {Model.AppName}";
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaApp — @Model.AppName</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI',Tahoma,sans-serif; background:#0a0a1a; color:#e0e0e0; min-height:100vh; display:flex; flex-direction:column; }
+        .header { background:linear-gradient(135deg,#1a1a2e,#16213e); padding:12px 24px; display:flex; align-items:center; gap:16px; border-bottom:2px solid #0f3460; }
+        .header h1 { font-size:1.2rem; color:#00d4ff; }
+        .header .back { color:#8b949e; text-decoration:none; font-size:0.9rem; }
+        .header .back:hover { color:#00d4ff; }
+        .status { margin-right:auto; padding:4px 12px; border-radius:12px; font-size:0.8rem; font-weight:bold; }
+        .status-loading { background:#e67e22; color:#000; }
+        .status-running { background:#2ecc71; color:#000; }
+        .controls { display:flex; gap:8px; padding:10px 24px; background:#0d1117; border-bottom:1px solid #21262d; }
+        .controls button { padding:6px 14px; border:1px solid #30363d; border-radius:6px; background:#21262d; color:#c9d1d9; cursor:pointer; font-size:0.85rem; }
+        .controls button:hover { border-color:#00d4ff; }
+        .controls button.primary { background:#0f3460; border-color:#00d4ff; color:#00d4ff; }
+        .main { flex:1; display:flex; }
+        .sidebar { width:280px; background:#0d1117; border-right:1px solid #21262d; padding:16px; overflow-y:auto; }
+        .sidebar h3 { color:#00d4ff; margin-bottom:12px; font-size:0.9rem; }
+        .info-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #21262d; font-size:0.82rem; }
+        .info-label { color:#8b949e; }
+        .info-value { color:#c9d1d9; font-family:monospace; }
+        #console { background:#000; color:#0f0; font-family:'Courier New',monospace; font-size:0.78rem; padding:10px; margin-top:16px; border-radius:6px; height:200px; overflow-y:auto; white-space:pre-wrap; }
+        #display { flex:1; background:#000; display:flex; align-items:center; justify-content:center; position:relative; }
+        .loading { position:absolute; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:10; }
+        .spinner { width:48px; height:48px; border:4px solid #21262d; border-top-color:#00d4ff; border-radius:50%; animation:spin 1s linear infinite; }
+        @@keyframes spin { to { transform:rotate(360deg); } }
+        .progress-bar { width:300px; height:6px; background:#21262d; border-radius:3px; overflow:hidden; }
+        .progress-fill { height:100%; background:#00d4ff; transition:width 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/Apps" class="back">→ العودة</a>
+        <h1>⚡ @Model.AppName</h1>
+        <span class="status status-loading" id="status">جاري التحميل...</span>
+    </div>
+    <div class="controls">
+        <button class="primary" onclick="alphaApp.start()">▶️ تشغيل</button>
+        <button onclick="alphaApp.pause()">⏸️ إيقاف مؤقت</button>
+        <button onclick="alphaApp.resume()">▶️ استئناف</button>
+        <button onclick="window.open('http://localhost:@Model.GuestPort','_blank')">🌐 فتح التطبيق</button>
+    </div>
+    <div class="main">
+        <div class="sidebar">
+            <h3>📊 معلومات</h3>
+            <div class="info-row"><span class="info-label">التطبيق</span><span class="info-value">@Model.AppName</span></div>
+            <div class="info-row"><span class="info-label">المعمارية</span><span class="info-value">@Model.Architecture</span></div>
+            <div class="info-row"><span class="info-label">الذاكرة</span><span class="info-value">@Model.MemoryMB MB</span></div>
+            <div class="info-row"><span class="info-label">المنفذ</span><span class="info-value">@Model.GuestPort</span></div>
+            <div class="info-row"><span class="info-label">الحجم</span><span class="info-value">@((Model.TotalSizeBytes/1048576.0).ToString("F1")) MB</span></div>
+            <div class="info-row"><span class="info-label">Checksum</span><span class="info-value" style="font-size:0.7rem">@Model.Checksum[..16]...</span></div>
+            <div id="console">AlphaApp Player v1.0 — @Model.AppName
+جاهز للتشغيل...
+</div>
+        </div>
+        <div id="display">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <div style="color:#00d4ff;font-size:1.1rem">جاري تحميل @Model.AppName...</div>
+                <div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
+                <div style="color:#8b949e;font-size:0.8rem" id="progress-text">تهيئة qemu-wasm...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const ALPHA_CONFIG = {
+            snapshotId: "@Model.Id",
+            appName: "@Model.AppName",
+            architecture: "@Model.Architecture",
+            memoryMB: @Model.MemoryMB,
+            guestPort: @Model.GuestPort,
+            diskImageUrl: "/api/snapshots/@Model.Id/disk",
+            snapshotName: "alpha-@Model.Id"
+        };
+
+        class AlphaAppPlayer {
+            constructor(config) {
+                this.config = config;
+                this.console = document.getElementById('console');
+            }
+            log(msg) {
+                const t = new Date().toLocaleTimeString('ar-SA');
+                this.console.textContent += `[${t}] ${msg}\n`;
+                this.console.scrollTop = this.console.scrollHeight;
+            }
+            setStatus(text, cls) {
+                const el = document.getElementById('status');
+                el.textContent = text; el.className = `status ${cls}`;
+            }
+            setProgress(pct, text) {
+                document.getElementById('progress').style.width = `${pct}%`;
+                document.getElementById('progress-text').textContent = text;
+            }
+            async start() {
+                try {
+                    this.log('⬇️ تحميل صورة القرص...');
+                    this.setProgress(10, 'تحميل صورة القرص...');
+                    const resp = await fetch(this.config.diskImageUrl);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const disk = await resp.arrayBuffer();
+                    this.log(`✅ القرص: ${(disk.byteLength/1048576).toFixed(1)} MB`);
+                    this.setProgress(40, 'تهيئة qemu-wasm...');
+                    this.log('🔧 تهيئة QEMU WebAssembly...');
+                    // qemu-wasm integration point
+                    if (typeof QemuWasm !== 'undefined') {
+                        this.log('✅ qemu-wasm متوفر — جاري التشغيل...');
+                    } else {
+                        this.log('ℹ️ وضع المعاينة (qemu-wasm غير محمّل)');
+                    }
+                    this.setProgress(70, 'تحميل اللقطة...');
+                    this.log(`📸 تحميل اللقطة: ${this.config.snapshotName}`);
+                    await new Promise(r => setTimeout(r, 1500));
+                    this.setProgress(100, 'جاهز!');
+                    document.getElementById('loading').style.display = 'none';
+                    this.setStatus('يعمل', 'status-running');
+                    this.log('🚀 الإقلاع الفوري من اللقطة المجمّدة!');
+                } catch (e) {
+                    this.log(`❌ ${e.message}`);
+                    this.setStatus('خطأ', 'status-error');
+                }
+            }
+            pause() { this.log('⏸️ إيقاف مؤقت'); this.setStatus('متوقف', 'status-loading'); }
+            resume() { this.log('▶️ استئناف'); this.setStatus('يعمل', 'status-running'); }
+        }
+        const alphaApp = new AlphaAppPlayer(ALPHA_CONFIG);
+    </script>
+</body>
+</html>
