@@ -2,6 +2,8 @@
 @{
     ViewData["Title"] = $"تشغيل {Model.AppName}";
     Layout = null;
+    var isRunning = (bool)(ViewBag.IsRunning ?? false);
+    var hostPort = (int)(ViewBag.HostPort ?? 0);
 }
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -17,38 +19,44 @@
         .header .back { color:#8b949e; text-decoration:none; font-size:0.9rem; }
         .header .back:hover { color:#00d4ff; }
         .status { margin-right:auto; padding:4px 12px; border-radius:12px; font-size:0.8rem; font-weight:bold; }
+        .status-stopped { background:#e74c3c; color:#fff; }
         .status-loading { background:#e67e22; color:#000; }
         .status-running { background:#2ecc71; color:#000; }
         .controls { display:flex; gap:8px; padding:10px 24px; background:#0d1117; border-bottom:1px solid #21262d; }
-        .controls button { padding:6px 14px; border:1px solid #30363d; border-radius:6px; background:#21262d; color:#c9d1d9; cursor:pointer; font-size:0.85rem; }
-        .controls button:hover { border-color:#00d4ff; }
+        .controls button { padding:6px 14px; border:1px solid #30363d; border-radius:6px; background:#21262d; color:#c9d1d9; cursor:pointer; font-size:0.85rem; transition:all 0.2s; }
+        .controls button:hover:not(:disabled) { border-color:#00d4ff; }
+        .controls button:disabled { opacity:0.4; cursor:not-allowed; }
         .controls button.primary { background:#0f3460; border-color:#00d4ff; color:#00d4ff; }
+        .controls button.danger { background:#3d1117; border-color:#e74c3c; color:#e74c3c; }
+        .controls button.success { background:#0d3d17; border-color:#2ecc71; color:#2ecc71; }
         .main { flex:1; display:flex; }
         .sidebar { width:280px; background:#0d1117; border-right:1px solid #21262d; padding:16px; overflow-y:auto; }
         .sidebar h3 { color:#00d4ff; margin-bottom:12px; font-size:0.9rem; }
         .info-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #21262d; font-size:0.82rem; }
         .info-label { color:#8b949e; }
         .info-value { color:#c9d1d9; font-family:monospace; }
-        #console { background:#000; color:#0f0; font-family:'Courier New',monospace; font-size:0.78rem; padding:10px; margin-top:16px; border-radius:6px; height:200px; overflow-y:auto; white-space:pre-wrap; }
+        #console { background:#000; color:#0f0; font-family:'Courier New',monospace; font-size:0.78rem; padding:10px; margin-top:16px; border-radius:6px; height:250px; overflow-y:auto; white-space:pre-wrap; }
         #display { flex:1; background:#000; display:flex; align-items:center; justify-content:center; position:relative; }
+        #app-frame { width:100%; height:100%; border:none; display:none; }
         .loading { position:absolute; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:10; }
         .spinner { width:48px; height:48px; border:4px solid #21262d; border-top-color:#00d4ff; border-radius:50%; animation:spin 1s linear infinite; }
         @@keyframes spin { to { transform:rotate(360deg); } }
         .progress-bar { width:300px; height:6px; background:#21262d; border-radius:3px; overflow:hidden; }
         .progress-fill { height:100%; background:#00d4ff; transition:width 0.3s; }
+        .placeholder { text-align:center; }
+        .placeholder .icon { font-size:4rem; margin-bottom:16px; }
     </style>
 </head>
 <body>
     <div class="header">
         <a href="/Apps" class="back">→ العودة</a>
         <h1>⚡ @Model.AppName</h1>
-        <span class="status status-loading" id="status">جاري التحميل...</span>
+        <span class="status status-stopped" id="status">متوقف</span>
     </div>
     <div class="controls">
-        <button class="primary" onclick="alphaApp.start()">▶️ تشغيل</button>
-        <button onclick="alphaApp.pause()">⏸️ إيقاف مؤقت</button>
-        <button onclick="alphaApp.resume()">▶️ استئناف</button>
-        <button onclick="window.open('http://localhost:@Model.GuestPort','_blank')">🌐 فتح التطبيق</button>
+        <button class="primary" id="btn-start" onclick="alphaApp.start()">▶️ تشغيل</button>
+        <button class="danger" id="btn-stop" onclick="alphaApp.stop()" disabled>⏹️ إيقاف</button>
+        <button class="success" id="btn-open" onclick="alphaApp.openApp()" disabled>🌐 فتح التطبيق</button>
     </div>
     <div class="main">
         <div class="sidebar">
@@ -56,20 +64,27 @@
             <div class="info-row"><span class="info-label">التطبيق</span><span class="info-value">@Model.AppName</span></div>
             <div class="info-row"><span class="info-label">المعمارية</span><span class="info-value">@Model.Architecture</span></div>
             <div class="info-row"><span class="info-label">الذاكرة</span><span class="info-value">@Model.MemoryMB MB</span></div>
-            <div class="info-row"><span class="info-label">المنفذ</span><span class="info-value">@Model.GuestPort</span></div>
+            <div class="info-row"><span class="info-label">منفذ الضيف</span><span class="info-value">@Model.GuestPort</span></div>
+            <div class="info-row"><span class="info-label">منفذ المضيف</span><span class="info-value" id="host-port-info">—</span></div>
             <div class="info-row"><span class="info-label">الحجم</span><span class="info-value">@((Model.TotalSizeBytes/1048576.0).ToString("F1")) MB</span></div>
-            <div class="info-row"><span class="info-label">Checksum</span><span class="info-value" style="font-size:0.7rem">@Model.Checksum[..16]...</span></div>
+            <div class="info-row"><span class="info-label">اللقطة</span><span class="info-value" style="font-size:0.7rem">@(Model.SnapshotName ?? $"alpha-{Model.Id}")</span></div>
             <div id="console">AlphaApp Player v1.0 — @Model.AppName
 جاهز للتشغيل...
 </div>
         </div>
         <div id="display">
-            <div class="loading" id="loading">
+            <div class="loading" id="loading" style="display:none">
                 <div class="spinner"></div>
-                <div style="color:#00d4ff;font-size:1.1rem">جاري تحميل @Model.AppName...</div>
+                <div style="color:#00d4ff;font-size:1.1rem" id="loading-text">جاري تشغيل @Model.AppName...</div>
                 <div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
-                <div style="color:#8b949e;font-size:0.8rem" id="progress-text">تهيئة qemu-wasm...</div>
+                <div style="color:#8b949e;font-size:0.8rem" id="progress-text">تهيئة...</div>
             </div>
+            <div class="placeholder" id="placeholder">
+                <div class="icon">🧊</div>
+                <div style="color:#00d4ff;font-size:1.2rem;margin-bottom:8px">لقطة مجمّدة جاهزة</div>
+                <div style="color:#8b949e;font-size:0.9rem">اضغط <strong>▶️ تشغيل</strong> لاستعادة VM من اللقطة</div>
+            </div>
+            <iframe id="app-frame"></iframe>
         </div>
     </div>
     <script>
@@ -78,60 +93,138 @@
             appName: "@Model.AppName",
             architecture: "@Model.Architecture",
             memoryMB: @Model.MemoryMB,
-            guestPort: @Model.GuestPort,
-            diskImageUrl: "/api/snapshots/@Model.Id/disk",
-            snapshotName: "alpha-@Model.Id"
+            guestPort: @Model.GuestPort
         };
 
         class AlphaAppPlayer {
             constructor(config) {
                 this.config = config;
                 this.console = document.getElementById('console');
+                this.hostPort = @hostPort;
+                this.isRunning = @(isRunning ? "true" : "false");
+                if (this.isRunning) {
+                    this.onRunning(this.hostPort);
+                }
             }
+
             log(msg) {
                 const t = new Date().toLocaleTimeString('ar-SA');
                 this.console.textContent += `[${t}] ${msg}\n`;
                 this.console.scrollTop = this.console.scrollHeight;
             }
+
             setStatus(text, cls) {
                 const el = document.getElementById('status');
                 el.textContent = text; el.className = `status ${cls}`;
             }
+
             setProgress(pct, text) {
                 document.getElementById('progress').style.width = `${pct}%`;
                 document.getElementById('progress-text').textContent = text;
             }
+
+            setButtons(start, stop, open) {
+                document.getElementById('btn-start').disabled = !start;
+                document.getElementById('btn-stop').disabled = !stop;
+                document.getElementById('btn-open').disabled = !open;
+            }
+
+            onRunning(hostPort) {
+                this.hostPort = hostPort;
+                this.isRunning = true;
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('placeholder').style.display = 'none';
+                document.getElementById('host-port-info').textContent = hostPort;
+                this.setStatus('يعمل', 'status-running');
+                this.setButtons(false, true, true);
+                this.log(`✅ التطبيق يعمل — المنفذ: ${hostPort}`);
+
+                const frame = document.getElementById('app-frame');
+                frame.src = `http://localhost:${hostPort}`;
+                frame.style.display = 'block';
+            }
+
             async start() {
+                this.setButtons(false, false, false);
+                document.getElementById('placeholder').style.display = 'none';
+                document.getElementById('loading').style.display = 'flex';
+                this.setStatus('جاري التشغيل...', 'status-loading');
+
                 try {
-                    this.log('⬇️ تحميل صورة القرص...');
-                    this.setProgress(10, 'تحميل صورة القرص...');
-                    const resp = await fetch(this.config.diskImageUrl);
-                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                    const disk = await resp.arrayBuffer();
-                    this.log(`✅ القرص: ${(disk.byteLength/1048576).toFixed(1)} MB`);
-                    this.setProgress(40, 'تهيئة qemu-wasm...');
-                    this.log('🔧 تهيئة QEMU WebAssembly...');
-                    // qemu-wasm integration point
-                    if (typeof QemuWasm !== 'undefined') {
-                        this.log('✅ qemu-wasm متوفر — جاري التشغيل...');
-                    } else {
-                        this.log('ℹ️ وضع المعاينة (qemu-wasm غير محمّل)');
+                    this.log('🚀 إطلاق VM من اللقطة المجمّدة...');
+                    this.setProgress(20, 'تشغيل QEMU مع loadvm...');
+
+                    const resp = await fetch(`/api/snapshots/${this.config.snapshotId}/launch`, { method: 'POST' });
+                    const data = await resp.json();
+
+                    if (!resp.ok) {
+                        throw new Error(data.error || `HTTP ${resp.status}`);
                     }
-                    this.setProgress(70, 'تحميل اللقطة...');
-                    this.log(`📸 تحميل اللقطة: ${this.config.snapshotName}`);
-                    await new Promise(r => setTimeout(r, 1500));
+
+                    this.log(`✅ QEMU يعمل — PID: ${data.pid}`);
+                    this.setProgress(60, 'انتظار جاهزية التطبيق...');
+
+                    this.log(`⏳ فحص المنفذ ${data.hostPort}...`);
+                    let ready = false;
+                    for (let i = 0; i < 30; i++) {
+                        await new Promise(r => setTimeout(r, 2000));
+                        try {
+                            const statusResp = await fetch(`/api/snapshots/${this.config.snapshotId}/status`);
+                            const statusData = await statusResp.json();
+                            if (statusData.status === 'running') {
+                                try {
+                                    await fetch(`http://localhost:${data.hostPort}`, { mode: 'no-cors', signal: AbortSignal.timeout(3000) });
+                                    ready = true;
+                                    break;
+                                } catch { }
+                            }
+                        } catch { }
+                        this.setProgress(60 + (i * 1.3), `فحص الجاهزية... (${i+1}/30)`);
+                    }
+
                     this.setProgress(100, 'جاهز!');
-                    document.getElementById('loading').style.display = 'none';
-                    this.setStatus('يعمل', 'status-running');
-                    this.log('🚀 الإقلاع الفوري من اللقطة المجمّدة!');
+                    this.onRunning(data.hostPort);
+                    this.log('🎉 الإقلاع الفوري من اللقطة المجمّدة!');
+
                 } catch (e) {
                     this.log(`❌ ${e.message}`);
-                    this.setStatus('خطأ', 'status-error');
+                    this.setStatus('خطأ', 'status-stopped');
+                    this.setButtons(true, false, false);
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('placeholder').style.display = '';
                 }
             }
-            pause() { this.log('⏸️ إيقاف مؤقت'); this.setStatus('متوقف', 'status-loading'); }
-            resume() { this.log('▶️ استئناف'); this.setStatus('يعمل', 'status-running'); }
+
+            async stop() {
+                this.log('⏹️ إيقاف VM...');
+                this.setButtons(false, false, false);
+
+                try {
+                    await fetch(`/api/snapshots/${this.config.snapshotId}/stop`, { method: 'POST' });
+
+                    this.isRunning = false;
+                    this.hostPort = 0;
+                    document.getElementById('app-frame').style.display = 'none';
+                    document.getElementById('app-frame').src = '';
+                    document.getElementById('placeholder').style.display = '';
+                    document.getElementById('host-port-info').textContent = '—';
+                    this.setStatus('متوقف', 'status-stopped');
+                    this.setButtons(true, false, false);
+                    this.log('✅ VM متوقف');
+
+                } catch (e) {
+                    this.log(`❌ ${e.message}`);
+                    this.setButtons(false, true, true);
+                }
+            }
+
+            openApp() {
+                if (this.hostPort > 0) {
+                    window.open(`http://localhost:${this.hostPort}`, '_blank');
+                }
+            }
         }
+
         const alphaApp = new AlphaAppPlayer(ALPHA_CONFIG);
     </script>
 </body>

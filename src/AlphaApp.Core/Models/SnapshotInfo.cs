@@ -12,6 +12,9 @@ public class SnapshotInfo
     /// <summary>مسار ملف القرص (qcow2)</summary>
     public string DiskImagePath { get; set; } = string.Empty;
 
+    /// <summary>اسم اللقطة داخل qcow2 (يُستخدم في loadvm)</summary>
+    public string SnapshotName { get; set; } = string.Empty;
+
     /// <summary>مسار ملف حالة الذاكرة</summary>
     public string MemoryStatePath { get; set; } = string.Empty;
 

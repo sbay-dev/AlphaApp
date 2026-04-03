@@ -14,6 +14,7 @@ public class QemuManager : IQemuManager, IDisposable
     private readonly ILogger<QemuManager> _logger;
     private readonly Dictionary<string, Process> _processes = [];
     private readonly Dictionary<string, (TcpClient client, NetworkStream stream)> _qmpConnections = [];
+    private readonly Dictionary<string, GuestState> _activeGuests = [];
     private int _nextQmpPort;
     private int _nextHostPort;
 
@@ -64,6 +65,7 @@ public class QemuManager : IQemuManager, IDisposable
         guest.StartedAt = DateTime.UtcNow;
         guest.Status = GuestStatus.Running;
         _processes[guestId] = process;
+        _activeGuests[guestId] = guest;
 
         // انتظار فتح منفذ QMP
         await WaitForQmpReadyAsync(qmpPort, 30, ct);
@@ -222,6 +224,7 @@ public class QemuManager : IQemuManager, IDisposable
         }
 
         guest.Status = GuestStatus.Stopped;
+        _activeGuests.Remove(guest.GuestId);
     }
 
     public async Task<QmpResponse> SendQmpCommandAsync(int qmpPort, QmpCommand command, CancellationToken ct = default)
@@ -294,6 +297,106 @@ public class QemuManager : IQemuManager, IDisposable
 
         _logger.LogWarning("⚠️ انتهت المهلة ({Timeout}s) بدون جاهزية على المنفذ {Port}", timeoutSeconds, guest.HostPort);
         return false;
+    }
+
+    /// <summary>تشغيل ضيف من لقطة مجمّدة — إقلاع فوري عبر loadvm</summary>
+    public async Task<GuestState> LaunchFromSnapshotAsync(SnapshotInfo snapshot, CancellationToken ct = default)
+    {
+        var qmpPort = Interlocked.Increment(ref _nextQmpPort);
+        var hostPort = Interlocked.Increment(ref _nextHostPort);
+        var guestId = $"run-{snapshot.Id}";
+
+        // إذا كان هناك ضيف يعمل بنفس المعرّف، أوقفه أولاً
+        if (_processes.TryGetValue(guestId, out var existingProc))
+        {
+            if (!existingProc.HasExited)
+            {
+                existingProc.Kill(entireProcessTree: true);
+                await existingProc.WaitForExitAsync(ct);
+            }
+            existingProc.Dispose();
+            _processes.Remove(guestId);
+            if (_qmpConnections.TryGetValue(guestId, out var oldConn))
+            {
+                try { oldConn.stream.Dispose(); oldConn.client.Dispose(); } catch { }
+                _qmpConnections.Remove(guestId);
+            }
+            _activeGuests.Remove(guestId);
+        }
+
+        var guest = new GuestState
+        {
+            GuestId = guestId,
+            AppId = snapshot.AppId,
+            QmpPort = qmpPort,
+            HostPort = hostPort,
+            GuestPort = snapshot.GuestPort,
+            Status = GuestStatus.Starting
+        };
+
+        var snapshotName = !string.IsNullOrEmpty(snapshot.SnapshotName)
+            ? snapshot.SnapshotName
+            : $"alpha-{snapshot.Id}";
+
+        var qemuBin = ResolveQemuBinary(snapshot.Architecture);
+        var args = new List<string>
+        {
+            "-m", $"{snapshot.MemoryMB}M",
+            "-smp", $"{_options.CpuCores}",
+            "-drive", $"file={snapshot.DiskImagePath},format=qcow2,if=virtio",
+            "-netdev", $"user,id=net0,hostfwd=tcp::{hostPort}-:{snapshot.GuestPort}",
+            "-device", "virtio-net-pci,netdev=net0",
+            "-qmp", $"tcp:127.0.0.1:{qmpPort},server,nowait",
+            "-nographic",
+            "-serial", "mon:stdio",
+            "-loadvm", snapshotName
+        };
+
+        if (_options.EnableKvm)
+            args.AddRange(["-enable-kvm", "-cpu", "host"]);
+        else
+            args.AddRange(["-cpu", "max"]);
+
+        _logger.LogInformation("🚀 إقلاع فوري من لقطة {Snapshot}: {Bin}", snapshotName, qemuBin);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = qemuBin,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+
+        var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"فشل تشغيل QEMU من اللقطة {snapshotName}");
+
+        guest.ProcessId = process.Id;
+        guest.StartedAt = DateTime.UtcNow;
+        _processes[guestId] = process;
+        _activeGuests[guestId] = guest;
+
+        // انتظار QMP
+        await WaitForQmpReadyAsync(qmpPort, 30, ct);
+        await InitQmpSessionAsync(guestId, qmpPort, ct);
+
+        // loadvm يستعيد الحالة فوراً — التطبيق يعمل من لحظة التجميد
+        guest.Status = GuestStatus.Running;
+
+        _logger.LogInformation("✅ الضيف {GuestId} يعمل من اللقطة — Host:{HostPort}→Guest:{GuestPort}",
+            guestId, hostPort, snapshot.GuestPort);
+
+        return guest;
+    }
+
+    /// <summary>الحصول على ضيف يعمل بمعرّف اللقطة</summary>
+    public GuestState? GetRunningGuest(string snapshotId)
+    {
+        var guestId = $"run-{snapshotId}";
+        if (!_processes.TryGetValue(guestId, out var proc) || proc.HasExited)
+            return null;
+        return _activeGuests.GetValueOrDefault(guestId);
     }
 
     private string ResolveQemuBinary(string arch) => arch switch

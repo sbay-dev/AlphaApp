@@ -25,6 +25,9 @@ public interface IQemuManager
     /// <summary>إرسال أمر QMP مباشر</summary>
     Task<QmpResponse> SendQmpCommandAsync(int qmpPort, QmpCommand command, CancellationToken ct = default);
 
+    /// <summary>تشغيل ضيف من لقطة مجمّدة (loadvm) — إقلاع فوري</summary>
+    Task<GuestState> LaunchFromSnapshotAsync(SnapshotInfo snapshot, CancellationToken ct = default);
+
     /// <summary>التحقق من جاهزية الضيف عبر فحص المنفذ</summary>
     Task<bool> WaitForGuestReadyAsync(GuestState guest, int timeoutSeconds, CancellationToken ct = default);
 }

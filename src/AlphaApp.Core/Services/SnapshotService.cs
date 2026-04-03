@@ -110,7 +110,19 @@ public class SnapshotService : ISnapshotService
 
             // ── الخطوة 6: حفظ حالة VM ──
             ReportProgress(progress, 6, totalSteps, "حفظ حالة VM (savevm)", "running", "snapshot");
-            var snapshotName = $"alpha-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+            var snapshot = new SnapshotInfo
+            {
+                AppId = app.Id,
+                AppName = app.Name,
+                DiskImagePath = diskImagePath,
+                Architecture = app.Architecture,
+                MemoryMB = app.MemoryMB,
+                GuestPort = app.GuestPort,
+                Status = SnapshotStatus.Creating,
+                TotalSizeBytes = new FileInfo(diskImagePath).Length,
+            };
+            var snapshotName = $"alpha-{snapshot.Id}";
+            snapshot.SnapshotName = snapshotName;
             var step6 = await ExecuteStepAsync("حفظ حالة VM (savevm)", async () =>
             {
                 app.Status = AlphaAppStatus.Frozen;
@@ -122,18 +134,9 @@ public class SnapshotService : ISnapshotService
 
             // ── الخطوة 7: إنشاء بيانات اللقطة ──
             ReportProgress(progress, 7, totalSteps, "إنشاء بيانات اللقطة", "running", "snapshot");
-            var snapshot = new SnapshotInfo
-            {
-                AppId = app.Id,
-                AppName = app.Name,
-                DiskImagePath = diskImagePath,
-                Architecture = app.Architecture,
-                MemoryMB = app.MemoryMB,
-                GuestPort = app.GuestPort,
-                Status = SnapshotStatus.Ready,
-                TotalSizeBytes = new FileInfo(diskImagePath).Length,
-                Checksum = await ComputeChecksumAsync(diskImagePath, ct)
-            };
+            snapshot.Status = SnapshotStatus.Ready;
+            snapshot.TotalSizeBytes = new FileInfo(diskImagePath).Length;
+            snapshot.Checksum = await ComputeChecksumAsync(diskImagePath, ct);
 
             // حفظ metadata
             await SaveSnapshotMetadataAsync(snapshot, ct);
